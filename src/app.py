@@ -282,62 +282,96 @@ def _discover_processed() -> list[dict[str, str | Path]]:
     return entries
 
 
-def _example_plot(df: pd.DataFrame) -> None:
+def plot_correlation_heatmap(df: pd.DataFrame) -> None:
     """
-    Schema-agnostic example plot:
-      - If numeric columns exist: histogram of the first numeric column.
-      - Else if categorical exists: top-20 frequency bar chart of the first categorical column.
-      - Else: show a friendly message.
+    Plot a correlation heatmap between all standardized (z-score) numeric features.
+
+    Each cell shows the Pearson correlation coefficient between two features:
+        - +1 → features increase together (strong positive relationship)
+        - -1 → one increases as the other decreases (strong negative relationship)
+        - 0  → no linear relationship
+
+    Interpretation:
+        - Bright red = strong positive correlation (features redundant or similar)
+        - Bright blue = strong negative correlation (inverse relationship)
+        - White/neutral = weak or no correlation
+
+    Insight:
+        - Reveals multicollinearity among features.
+        - Identifies clusters of correlated variables (latent groups).
+        - Highlights redundant engineered columns (e.g., norm vs zscore).
+
+    Args:
+        df (pd.DataFrame): Dataset containing z-score columns (columns ending with "_zscore").
     """
-    num_cols = df.select_dtypes(include="number").columns.tolist()
-    cat_cols = df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
-
-    # Sample for speed with large datasets
-    dfp = df
-    if len(df) > 50_000:
-        dfp = df.sample(50_000, random_state=42)
-
-    if num_cols:
-        col = num_cols[0]
-        st.markdown(f"**Numeric distribution** — `{col}`")
-        bins = st.slider("Bins", 10, 100, 30, key=f"bins_{col}")
-        chart = (
-            alt.Chart(dfp)
-            .mark_bar()
-            .encode(
-                x=alt.X(f"{col}:Q", bin=alt.Bin(maxbins=bins)),
-                y=alt.Y("count():Q", title="Count"),
-                tooltip=[alt.Tooltip(f"{col}:Q", format=".3f"), "count()"],
-            )
-        )
-        st.altair_chart(chart, use_container_width=True)
+    z_cols = [c for c in df.columns if c.endswith("_zscore")]
+    if len(z_cols) < 2:
+        st.info("Need at least two z-scored columns for correlation heatmap.")
         return
 
-    if cat_cols:
-        col = cat_cols[0]
-        st.markdown(f"**Category frequency** — `{col}` (top 20)")
-        freq = (
-            dfp[col]
-            .astype("object")
-            .value_counts(dropna=False)
-            .reset_index()
-            .rename(columns={"index": col, col: "count"})
-            .head(20)
+    corr = df[z_cols].corr()
+    corr_long = corr.stack().reset_index()
+    corr_long.columns = ["x", "y", "corr"]
+
+    chart = (
+        alt.Chart(corr_long)
+        .mark_rect()
+        .encode(
+            x=alt.X("x:N", sort=z_cols, title=None),
+            y=alt.Y("y:N", sort=z_cols, title=None),
+            color=alt.Color(
+                "corr:Q", scale=alt.Scale(scheme="redblue", domain=(-1, 1))
+            ),
+            tooltip=["x", "y", alt.Tooltip("corr:Q", format=".2f")],
         )
-        chart = (
-            alt.Chart(freq)
-            .mark_bar()
-            .encode(
-                x=alt.X("count:Q"),
-                y=alt.Y(f"{col}:N", sort="-x"),
-                tooltip=[f"{col}:N", "count:Q"],
-            )
-            .properties(height=min(30 * len(freq), 600))
-        )
-        st.altair_chart(chart, use_container_width=True)
+        .properties(title="Correlation heatmap (z-score features)")
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+def plot_zscore_distributions(df: pd.DataFrame) -> None:
+    """
+    Plot overlaid density curves of all standardized (z-score) numeric features.
+
+    Each line represents the distribution of a feature's z-scores across all samples.
+
+    Interpretation:
+        - Because all features are standardized (mean≈0, std≈1), distributions are comparable.
+        - The closer the curves overlap around 0, the more similar the features’ scales and spread.
+        - Wide curves indicate more variability; narrow curves show low variance.
+        - Skewed or multi-peaked lines suggest non-normal or heterogeneous distributions.
+
+    Insight:
+        - Confirms successful standardization and helps detect features with abnormal variance.
+        - Highlights skewness, multimodality, or potential outliers even after scaling.
+        - Useful for sanity-checking numeric features before modeling.
+
+    Args:
+        df (pd.DataFrame): Dataset containing z-score columns (columns ending with "_zscore").
+    """
+    z_cols = [c for c in df.columns if c.endswith("_zscore")]
+    if not z_cols:
+        st.info("No z-score columns found.")
         return
 
-    st.info("No numeric or categorical columns detected to plot.")
+    melted = df[z_cols].melt(var_name="feature", value_name="zscore")
+
+    chart = (
+        alt.Chart(melted)
+        .transform_density(
+            "zscore",
+            groupby=["feature"],
+            as_=["zscore", "density"],
+        )
+        .mark_line()
+        .encode(
+            x=alt.X("zscore:Q"),
+            y=alt.Y("density:Q"),
+            color="feature:N",
+        )
+        .properties(title="Distribution of standardized (z-score) features")
+    )
+    st.altair_chart(chart, use_container_width=True)
 
 
 # UI: selector + load button
@@ -366,6 +400,7 @@ else:
             with st.expander("Preview (head)"):
                 st.dataframe(df_sel.head(200), use_container_width=True)
             # example plot
-            _example_plot(df_sel)
+            plot_correlation_heatmap(df_sel)
+            plot_zscore_distributions(df_sel)
         except Exception as e:
             st.exception(e)

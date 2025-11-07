@@ -191,17 +191,28 @@ def load_dataset_from_file(
         raise ValueError("stage must be one of ['raw', 'processed']")
 
 
-if __name__ == "__main__":
-    dataset_name = "rajpurkar/squad"
-    split = "validation"
+def main(dataset_name: str = "rajpurkar/squad", split: str = "validation") -> None:
+    """
+    Run the full ETL pipeline for a given dataset and split.
 
-    # Download raw dataset (saved)
+    This downloads the dataset, processes it, and saves both
+    raw and processed versions to disk.
+
+    Args:
+        dataset_name (str): Hugging Face dataset ID.
+        split (str): Dataset split (e.g., 'train', 'validation').
+    """
+    logger.info(f"Starting ETL pipeline for dataset '{dataset_name}' (split='{split}')")
+
+    # Step 1: Download raw dataset
     download_hf_dataset(dataset_name, split=split)
 
-    # Load processed dataset (saved only here)
+    # Step 2: Load or process dataset
     processed_df = load_dataset_from_file(dataset_name, stage="processed", split=split)
 
     logger.info("ETL pipeline completed successfully!")
+    logger.info(f"Processed data shape: {processed_df.shape}")
+
 
 __all__ = [
     "download_hf_dataset",
